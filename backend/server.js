@@ -1,12 +1,9 @@
-// server.js
 import express from "express";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import cors from "cors";
-import path from "path";
-import { fileURLToPath } from "url";
 
 // Routes & middleware
 import auth from "./routes/auth.js";
@@ -17,53 +14,32 @@ import { authMiddleware } from "./middleware/authmiddleware.js";
 import User from "./models/User.js";
 
 dotenv.config();
-
 const app = express();
-app.use(express.json());
 
-// ------------------------
-// Fix #1: __dirname for ES Modules
-// ------------------------
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// ------------------------
-// Connect to MongoDB (Fix #2: Use cloud MongoDB Atlas for deployment)
-// ------------------------
-mongoose
-  .connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log("✅ MongoDB connected"))
-  .catch((err) => console.log(err));
-
-// ------------------------
 // Middleware
-// ------------------------
+
 app.use(express.json());
 
-// If you want CORS during local development
-if (process.env.NODE_ENV === "development") {
-  app.use(
-    cors({
-      origin: "http://localhost:3000",
-      credentials: true,
-    })
-  );
-}
+app.use(cors({
+  origin: 'http://localhost:3000', // your frontend URL
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true
+}));
 
-// ------------------------
-// API Routes
-// ------------------------
+
+// Optional: request logger
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
+// API routes
 app.post("/register", async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ message: "User already exists" });
-    }
+    if (existingUser) return res.status(400).json({ message: "User already exists" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = new User({ name, email, password: hashedPassword });
@@ -81,14 +57,10 @@ app.post("/login", async (req, res) => {
     const { email, password } = req.body;
 
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: "User not found" });
-    }
+    if (!user) return res.status(400).json({ message: "User not found" });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: "Invalid credentials" });
-    }
+    if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 
     const token = jwt.sign(
       { id: user._id, email: user.email },
@@ -103,7 +75,7 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// Protected route
+// Protected route example
 app.get("/protected", authMiddleware, (req, res) => {
   res.json({ message: "You accessed a protected route!", user: req.user });
 });
@@ -112,17 +84,15 @@ app.get("/protected", authMiddleware, (req, res) => {
 app.use("/auth", auth);
 app.use("/vault", vault);
 
-// ------------------------
-// Serve React frontend (Fix #3: Serve after API routes)
-// ------------------------
-app.use(express.static(path.join(__dirname, "client")));
-
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "client", "index.html"));
-});
-
-// ------------------------
-// Start server (Fix #4: Use dynamic port for Render)
-// ------------------------
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+// Start server AFTER MongoDB is connected
+mongoose
+  .connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => {
+    console.log("✅ MongoDB connected");
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+  })
+  .catch((err) => console.error("❌ MongoDB connection error:", err));
