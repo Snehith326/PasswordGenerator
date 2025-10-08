@@ -4,15 +4,16 @@ import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
+import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 
-// Import routes and middleware
+// Routes & middleware
 import auth from "./routes/auth.js";
 import vault from "./routes/vault.js";
 import { authMiddleware } from "./middleware/authmiddleware.js";
-import cors from "cors";
 
-
-// Import User model (✅ modification: no redefinition in server.js)
+// Models
 import User from "./models/User.js";
 
 dotenv.config();
@@ -20,53 +21,61 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-app.use(cors({
-  origin: "http://localhost:3000",
-  credentials: true,
-}));
+// ------------------------
+// Fix #1: __dirname for ES Modules
+// ------------------------
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-app.use(express.json());
-const JWT_SECRET = process.env.JWT_SECRET; // Keep secret in .env
-
-// ✅ Connect to MongoDB
+// ------------------------
+// Connect to MongoDB (Fix #2: Use cloud MongoDB Atlas for deployment)
+// ------------------------
 mongoose
-  .connect("mongodb://127.0.0.1:27017/passwordVault", {
+  .connect(process.env.MONGO_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.log(err));
 
-// -----------------
-// Routes
-// -----------------
+// ------------------------
+// Middleware
+// ------------------------
+app.use(express.json());
 
-// ✅ Register API
+// If you want CORS during local development
+if (process.env.NODE_ENV === "development") {
+  app.use(
+    cors({
+      origin: "http://localhost:3000",
+      credentials: true,
+    })
+  );
+}
+
+// ------------------------
+// API Routes
+// ------------------------
 app.post("/register", async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Save new user
     const newUser = new User({ name, email, password: hashedPassword });
     await newUser.save();
 
     res.status(201).json({ message: "User registered successfully!" });
   } catch (error) {
-    console.log(error);
+    console.error(error);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// ✅ Login API
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -81,10 +90,9 @@ app.post("/login", async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    // Generate JWT token
     const token = jwt.sign(
       { id: user._id, email: user.email },
-      JWT_SECRET,
+      process.env.JWT_SECRET,
       { expiresIn: "1h" }
     );
 
@@ -95,14 +103,26 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// ✅ Protected route
+// Protected route
 app.get("/protected", authMiddleware, (req, res) => {
   res.json({ message: "You accessed a protected route!", user: req.user });
 });
 
-// ✅ Use modular routes
+// Modular routes
 app.use("/auth", auth);
 app.use("/vault", vault);
 
-// Start server
-app.listen(5000, () => console.log("✅ Server running on port 5000"));
+// ------------------------
+// Serve React frontend (Fix #3: Serve after API routes)
+// ------------------------
+app.use(express.static(path.join(__dirname, "client")));
+
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "client", "index.html"));
+});
+
+// ------------------------
+// Start server (Fix #4: Use dynamic port for Render)
+// ------------------------
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
